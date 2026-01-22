@@ -1,0 +1,92 @@
+node {
+    // Environment variables
+    def MAVEN_HOME = '/opt/apache-maven-3.9.12'
+    def SONAR_PROJECT_KEY = 'Hiring-app'
+    def SONAR_PROJECT_NAME = 'hiringapp'
+    def NEXUS_URL = '54.91.134.212:8081'
+    def NEXUS_REPOSITORY = 'hiring_app'
+    def NEXUS_VERSION = 'nexus3'
+    def NEXUS_PROTOCOL = 'http'
+    def TOMCAT_URL = 'http://54.88.102.8:8080'
+
+    // Setting PATH
+    withEnv(["PATH+MAVEN=${MAVEN_HOME}/bin"]) {
+        timestamps {
+            try {
+                stage('Notify Started') {
+                    slackSend(
+                        color: '#439FE0',
+                        message: "Attaluri Sai Teja | ${env.JOB_NAME} - #${env.BUILD_NUMBER} Started (<${env.BUILD_URL}|Open>)",
+                        tokenCredentialId: 'slack_notification'
+                    )
+                }
+
+                stage('Git Clone') {
+                    git branch: 'main', url: 'https://github.com/betawins/hiring-app.git'
+                }
+
+                stage('SonarQube Analysis') {
+                    withSonarQubeEnv('sonar-server') {
+                        sh """
+                            mvn clean verify \
+                            org.sonarsource.scanner.maven:sonar-maven-plugin:sonar \
+                            -Dsonar.projectKey=${SONAR_PROJECT_KEY} \
+                            -Dsonar.projectName=${SONAR_PROJECT_NAME}
+                        """
+                    }
+                }
+
+                stage('Maven Build') {
+                    sh 'mvn clean package -DskipTests'
+                }
+
+                stage('Nexus Upload') {
+                    def WAR_FILE = sh(script: "ls target/*.war", returnStdout: true).trim()
+                    
+                    nexusArtifactUploader(
+                        nexusVersion: NEXUS_VERSION,
+                        protocol: NEXUS_PROTOCOL,
+                        nexusUrl: NEXUS_URL,
+                        repository: NEXUS_REPOSITORY,
+                        credentialsId: 'nexus_server',
+                        groupId: 'in.javahome',
+                        version: "${env.BUILD_NUMBER}-SNAPSHOT",
+                        artifacts: [[
+                            artifactId: 'hiring',
+                            classifier: '',
+                            type: 'war',
+                            file: WAR_FILE
+                        ]]
+                    )
+                }
+
+                stage('Deploy to Tomcat') {
+                    deploy adapters: [
+                        tomcat9(
+                            credentialsId: 'tomcat',
+                            url: "${TOMCAT_URL}"
+                        )
+                    ],
+                    contextPath: 'sabear',
+                    war: 'target/*.war'
+                }
+
+                // Success Post-Action
+                slackSend(
+                    color: 'good',
+                    message: "Attaluri Sai Teja | ${env.JOB_NAME} - #${env.BUILD_NUMBER} Success (<${env.BUILD_URL}|Open>)",
+                    tokenCredentialId: 'slack_notification'
+                )
+
+            } catch (Exception e) {
+                // Failure Post-Action
+                slackSend(
+                    color: 'danger',
+                    message: "Attaluri Sai Teja | ${env.JOB_NAME} - #${env.BUILD_NUMBER} Failed (<${env.BUILD_URL}|Open>)",
+                    tokenCredentialId: 'slack_notification'
+                )
+                throw e // Ensure the build still shows as failed in Jenkins
+            }
+        }
+    }
+}
