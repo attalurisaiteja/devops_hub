@@ -1,0 +1,146 @@
+Prerequisite to Install jenkins is java.
+
+Download jenkins Repo:
+=====================
+sudo wget -O /etc/yum.repos.d/jenkins.repo https://pkg.jenkins.io/redhat-stable/jenkins.repo  
+
+Import the jenkins key:
+======================	
+sudo rpm --import https://pkg.jenkins.io/redhat-stable/jenkins.io-2023.key
+
+Update ec2:
+==========
+sudo yum upgrade
+
+Add required dependencies for the jenkins package:
+=================================================
+sudo amazon-linux-extras install java-openjdk11
+
+Install Jenkins:
+===============
+sudo yum install jenkins
+
+
+
+
+
+
+
+
+
+
+
+
+pipeline {
+    agent any   // Run pipeline on any available Jenkins agent
+
+    tools {
+        maven 'Maven3'   // Use configured Maven installation
+        jdk 'JDK11'      // Use configured JDK
+    }
+
+    environment {
+        SONARQUBE_SERVER = "SonarQube"        // SonarQube server name in Jenkins
+        NEXUS_CREDENTIALS = "nexus-creds"     // Jenkins credentials ID for Nexus
+        TOMCAT_CREDENTIALS = "tomcat-creds"   // Jenkins credentials ID for Tomcat
+    }
+
+    stages {
+
+        stage('Checkout') {
+            steps {
+                // Pull source code from Git repository
+                git 'https://github.com/company/myapp.git'
+            }
+        }
+
+        stage('Compile') {
+            steps {
+                // Compile the source code
+                sh 'mvn clean compile'
+            }
+        }
+
+        stage('Test') {
+            steps {
+                // Run unit test cases
+                sh 'mvn test'
+            }
+        }
+
+        stage('SonarQube Analysis') {
+            steps {
+                // Perform static code quality and security analysis
+                withSonarQubeEnv("${SONARQUBE_SERVER}") {
+                    sh 'mvn sonar:sonar'
+                }
+            }
+        }
+
+        stage('Package') {
+            steps {
+                // Package application into WAR file
+                sh 'mvn package'
+            }
+        }
+
+        stage('Publish to Nexus') {
+            steps {
+                // Upload built artifact to Nexus repository
+                withCredentials([usernamePassword(
+                    credentialsId: "${NEXUS_CREDENTIALS}",
+                    usernameVariable: 'NEXUS_USER',
+                    passwordVariable: 'NEXUS_PASS'
+                )]) {
+                    sh 'mvn deploy'
+                }
+            }
+        }
+
+        stage('Deploy to Tomcat') {
+            steps {
+                // Deploy WAR file to Tomcat server
+                withCredentials([usernamePassword(
+                    credentialsId: "${TOMCAT_CREDENTIALS}",
+                    usernameVariable: 'TOMCAT_USER',
+                    passwordVariable: 'TOMCAT_PASS'
+                )]) {
+                    sh '''
+                    curl -u $TOMCAT_USER:$TOMCAT_PASS \
+                    -T target/myapp.war \
+                    http://tomcat-server:8080/manager/text/deploy?path=/myapp&update=true
+                    '''
+                }
+            }
+        }
+    }
+
+    post {
+
+        success {
+            // Runs when pipeline completes successfully
+            echo "Build and deployment completed successfully"
+        }
+
+        failure {
+            // Runs when any stage fails
+            echo "Pipeline failed. Please check logs."
+        }
+
+        always {
+            // Runs regardless of success or failure
+            echo "Pipeline execution finished"
+        }
+    }
+}
+
+
+
+
+
+
+
+
+
+
+
