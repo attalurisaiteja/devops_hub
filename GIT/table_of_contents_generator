@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+
+# generate-toc.sh - Auto-generate Table of Contents for GitHub README.md
+# Save this file in your repo root and run: bash generate-toc.sh
+
+set -euo pipefail
+
+README="README.md"
+TOC_START="<!-- TOC -->"
+TOC_END="## Table of Contents"
+TOC_END="<!-- TOC END -->"
+
+# Directories and files to completely ignore
+IGNORE_DIRS=".git .github __pycache__ venv env .venv node_modules dist build .idea .vscode coverage htmlcov"
+IGNORE_FILES=".DS_Store LICENSE generate-toc.sh"
+
+# Temporary file
+TEMP_TOC=$(mktemp)
+
+# Clean up temp file on exit
+trap 'rm -f "$TEMP_TOC"' EXIT
+
+echo -e "$TOC\n" > "$TEMP_TOC"
+
+# Function to check if path should be ignored
+should_ignore() {
+    local path="$1"
+    for d in $IGNORE_DIRS; do
+        [[ "$path" == *"/$d"* || "$path" == "$d"* ]] && return 0
+    done
+    for f in $IGNORE_FILES; do
+        [[ "$(basename "$path")" == "$f" ]] && return 0
+    done
+    return 1
+}
+
+# Find all files and directories (except ignored ones), sorted naturally
+find . -mindepth 1 -not -path '*/\.*' | sort | while read -r item; do
+    # Strip leading ./
+    item="${item#./}"
+
+    # Skip ignored paths
+    should_ignore "$item" && continue
+
+    # Count depth for indentation
+    depth=$(echo "$item" | tr -cd '/' | wc -c)
+    indent=$(printf '  %.0s' $(seq 1 $depth))
+
+    if [[ -d "$item" ]]; then
+        name=$(basename "$item")
+        display_name=${name//-/ }   # replace - with space
+        display_name=${display_name//_/ }   # replace _ with space
+        display_name=${display_name^}       # capitalize first letter
+        echo "$indent- [$display_name]($item/)" >> "$TEMP_TOC"
+    else
+        # File
+        filename=$(basename "$item")
+        ext="${filename##*.}"
+        name_no_ext="${filename%.*}"
+
+        # Special nice name for markdown files
+        if [[ "$ext" == "md" || "$ext" == "markdown" ]] && [[ "$filename" != "README.md" ]]; then
+            display_name=$(echo "$name_no_ext" | tr '_' ' ' | tr '-' ' ')
+            # Capitalize each word
+            display_name=$(echo "$display_name" | awk '{for(i=1;i<=NF;i++) $i=toupper(substr($i,1,1)) substr($i,2)}1')
+        else
+            display_name="$filename"
+        fi
+
+        echo "$indent- [$display_name]($item)" >> "$TEMP_TOC"
+    fi
+done
+
+# Add final newline
+echo >> "$TEMP_TOC"
+
+# Update README.md
+if [[ ! -f "$README" ]]; then
+    echo "# $(basename "$(pwd)")" > "$README"
+    echo >> "$README"
+fi
+
+if grep -q "$TOC_START" "$README"; then
+    # Replace existing TOC
+    sed -i.bak "/$TOC_START/,/$TOC_END/c\\$TOC_START\n$(cat "$TEMP_TOC")\n$TOC_END" "$README"
+    rm -f "$README.bak"
+else
+    # Insert after first # header or at top
+    if grep -q "^# " "$README"; then
+        sed -i.bak "/^# /a\\
+\\
+$TOC_START\\
+$(cat "$TEMP_TOC")\\
+$TOC_END" "$README"
+    else
+        # Prepend if no header
+        { echo -e "$TOC_START\n$(cat "$TEMP_TOC")$TOC_END\n"; cat "$README"; } > temp_readme && mv temp_readme "$README"
+    fi
+    rm -f "$README.bak"
+fi
+
+echo "Table of Contents generated and inserted into $README!"
+echo "Run this script anytime you add new files/folders!"
+
+
+
+
+
+
+
+
